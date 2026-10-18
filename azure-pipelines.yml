@@ -1,7 +1,8 @@
 # ==============================================================================
 # Azure DevOps DevSecOps Pipeline:
-# Tools: Gitleaks (Secrets) + tfsec (Security) + TFLint (Linter) + Infracost (Cost)
-# Lifecycle: Quality & Security Scan -> Plan -> Manual Approval -> Apply
+# Security: Gitleaks (Secrets) + tfsec (Vulnerabilities) + Checkov (Compliance)
+# Cost: Azure Infrastructure Monthly Budget Estimator
+# Lifecycle: Security & Cost Scan -> Terraform Plan -> Manual Approval -> Apply
 # Organization: pipelineagentic
 # Project: Axion_project (https://dev.azure.com/pipelineagentic/Axion_project)
 # Service Connection: Axion project
@@ -31,7 +32,7 @@ variables:
 
 stages:
   # ============================================================================
-  # STAGE 1: DEVSECOPS CHECKS, COST ESTIMATION & TERRAFORM PLAN
+  # STAGE 1: SECURITY SCAN, COST ESTIMATION & TERRAFORM PLAN
   # ============================================================================
   - stage: ScanAndPlan
     displayName: "Security, Cost & Plan [${{ parameters.environment }}]"
@@ -39,7 +40,7 @@ stages:
       vmImage: "ubuntu-latest"
     jobs:
       - job: SecurityCostAndPlan
-        displayName: "Run Scans, Cost Estimate & Plan"
+        displayName: "Run Scans, Cost Breakdown & Plan"
         steps:
           # 1. Install Terraform CLI
           - task: TerraformInstaller@1
@@ -52,58 +53,51 @@ stages:
           # --------------------------------------------------------------------
           - bash: |
               echo "=========================================================="
-              echo " ==> Installing Gitleaks (Secret Detection Tool)..."
+              echo " [1/4] GITLEAKS: Secret & Password Leak Detection"
               echo "=========================================================="
               curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
               chmod +x /tmp/gitleaks
 
-              echo "==> Scanning repository for passwords, API tokens & secrets..."
+              echo "==> Scanning entire repository for leaked credentials, secrets & keys..."
               /tmp/gitleaks detect --source="$(System.DefaultWorkingDirectory)" --no-git --verbose || true
-            displayName: "Security Tool: Gitleaks (Secret Detection)"
+              echo "==> Gitleaks scan completed."
+            displayName: "Security Tool 1: Gitleaks (Secret Detection)"
 
           # --------------------------------------------------------------------
-          # SECURITY TOOL 2: TFSEC (Terraform Static Security Scanner)
+          # SECURITY TOOL 2: TFSEC (Terraform Cloud Vulnerability Scanner)
           # --------------------------------------------------------------------
           - bash: |
               echo "=========================================================="
-              echo " ==> Installing tfsec (Terraform Security Scanner)..."
+              echo " [2/4] TFSEC: Azure Infrastructure Security Scan"
               echo "=========================================================="
               curl -sSL https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -o /tmp/tfsec
               chmod +x /tmp/tfsec
 
-              echo "==> Scanning Terraform code for cloud vulnerabilities..."
-              /tmp/tfsec $(workingDirectory) --soft-fail
-            displayName: "Security Tool: tfsec (Vulnerability Scan)"
+              echo "==> Scanning all modules and environments with --force-all-dirs..."
+              /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --soft-fail || true
+            displayName: "Security Tool 2: tfsec (Vulnerability Scan)"
 
           # --------------------------------------------------------------------
-          # QUALITY TOOL 3: TFLINT (Terraform Best Practices Linter)
+          # SECURITY TOOL 3: CHECKOV (CIS Benchmarks & Policy Scanner)
           # --------------------------------------------------------------------
           - bash: |
               echo "=========================================================="
-              echo " ==> Installing TFLint (Best Practices Linter)..."
+              echo " [3/4] CHECKOV: Policy & Compliance Security Audit"
               echo "=========================================================="
-              curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-
-              echo "==> Running TFLint on $(workingDirectory)..."
-              tflint --chdir=$(workingDirectory) || true
-            displayName: "Quality Tool: TFLint (Code Linter)"
+              pip install --quiet checkov
+              echo "==> Running Checkov on Terraform modules and environments..."
+              checkov -d $(System.DefaultWorkingDirectory) --framework terraform --soft-fail --output cli || true
+            displayName: "Security Tool 3: Checkov (Compliance & CIS Audit)"
 
           # --------------------------------------------------------------------
-          # COST TOOL 4: OPENCOST (CNCF Open-Source Cloud & Kubernetes Cost Tool)
+          # COST TOOL 4: AZURE INFRASTRUCTURE COST ESTIMATION
           # --------------------------------------------------------------------
           - bash: |
               echo "=========================================================="
-              echo " ==> Installing OpenCost CLI (kubectl-cost)..."
+              echo " [4/4] COST ESTIMATION: Azure Monthly Budget Breakdown"
               echo "=========================================================="
-              os=$(uname | tr '[:upper:]' '[:lower:]')
-              arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')
-              curl -sSL "https://github.com/kubecost/kubectl-cost/releases/latest/download/kubectl-cost-${os}-${arch}.tar.gz" | tar xz -C /tmp
-              chmod +x /tmp/kubectl-cost
-              sudo mv /tmp/kubectl-cost /usr/local/bin/kubectl-cost
-              echo "OpenCost CLI version:"
-              kubectl-cost --version || true
-              echo "OpenCost (CNCF open-source) installed successfully without any proprietary API keys."
-            displayName: "Cost Tool: OpenCost (Open Source Cost Allocation)"
+              python3 scripts/cost_estimator.py $(workingDirectory)
+            displayName: "Cost Tool: Azure Monthly Cost Estimation"
 
           # --------------------------------------------------------------------
           # TERRAFORM INIT, VALIDATE & PLAN
@@ -137,7 +131,7 @@ stages:
               commandOptions: "-var-file=terraform.tfvars"
 
   # ============================================================================
-  # STAGE 2: MANUAL APPROVAL (Apply karne se pehle review & approval)
+  # STAGE 2: MANUAL APPROVAL (Apply se pehle Security aur Cost Review)
   # ============================================================================
   - stage: Approval
     displayName: "Manual Approval [${{ parameters.environment }}]"
@@ -152,10 +146,10 @@ stages:
             displayName: "Approve Apply for ${{ parameters.environment }}"
             timeoutInMinutes: 1440
             inputs:
-              instructions: "Please review the Gitleaks secrets report, tfsec security scan, OpenCost checks, and Terraform Plan logs in Stage 1. Click 'Resume' to approve deployment to ${{ parameters.environment }} or 'Reject' to cancel."
+              instructions: "Please review the Gitleaks secrets report, tfsec & Checkov security findings, Azure monthly cost breakdown, and Terraform Plan logs in Stage 1. Click 'Resume' to approve deployment to ${{ parameters.environment }} or 'Reject' to cancel."
 
   # ============================================================================
-  # STAGE 3: TERRAFORM APPLY (Approval milne ke baad execute hoga)
+  # STAGE 3: TERRAFORM APPLY
   # ============================================================================
   - stage: Apply
     displayName: "Terraform Apply [${{ parameters.environment }}]"
@@ -166,13 +160,11 @@ stages:
       - job: TerraformApply
         displayName: "Run Terraform Apply"
         steps:
-          # 1. Install Terraform CLI
           - task: TerraformInstaller@1
             displayName: "Install Terraform"
             inputs:
               terraformVersion: "latest"
 
-          # 2. Terraform Init
           - task: TerraformTaskV4@4
             displayName: "Terraform Init"
             inputs:
@@ -185,7 +177,6 @@ stages:
               backendAzureRmContainerName: "$(backendContainer)"
               backendAzureRmKey: "${{ parameters.environment }}.terraform.tfstate"
 
-          # 3. Terraform Apply
           - task: TerraformTaskV4@4
             displayName: "Terraform Apply"
             inputs:
