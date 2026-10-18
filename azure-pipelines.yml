@@ -1,13 +1,11 @@
 # ==============================================================================
-# Azure DevOps Pipeline for Terraform Infrastructure Deployment
+# Azure DevOps Pipeline (Standard Task Assistant Format)
 # Organization: pipelineagentic
 # Project: Axion_project (https://dev.azure.com/pipelineagentic/Axion_project)
 # Service Connection: Axion project
 # Agent Pool: Microsoft-hosted (ubuntu-latest)
-# Backend: Azure Blob Storage (rg: Demo_rg_A, storage: demostgab, container: democontainer)
+# Backend: Azure Blob Storage (Demo_rg_A / demostgab / democontainer)
 # ==============================================================================
-
-name: $(Date:yyyyMMdd)$(Rev:.r)_${{ parameters.environment }}_${{ parameters.action }}
 
 trigger: none
 pr: none
@@ -31,136 +29,74 @@ parameters:
       - apply
       - destroy
 
-variables:
-  - name: serviceConnection
-    value: "Axion project"
-  - name: terraformVersion
-    value: "1.9.5"
-  - name: backendResourceGroup
-    value: "Demo_rg_A"
-  - name: backendStorageAccount
-    value: "demostgab"
-  - name: backendContainer
-    value: "democontainer"
-
 pool:
   vmImage: "ubuntu-latest"
 
-stages:
-  - stage: Terraform
-    displayName: "Terraform - ${{ parameters.environment }} [${{ parameters.action }}]"
-    jobs:
-      - job: ExecuteTerraform
-        displayName: "Run Terraform ${{ parameters.action }}"
-        steps:
-          # 1. Ensure Terraform is installed on the Microsoft-hosted agent
-          - bash: |
-              set -e
-              if ! command -v terraform &> /dev/null; then
-                echo "Terraform not found. Installing Terraform v$(terraformVersion)..."
-                sudo apt-get update -y && sudo apt-get install -y gnupg software-properties-common curl
-                curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-                echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-                sudo apt-get update -y && sudo apt-get install -y terraform
-              else
-                echo "Terraform is already installed: $(terraform --version | head -n 1)"
-              fi
-            displayName: "Verify / Install Terraform CLI"
+variables:
+  serviceConnection: "Axion project"
+  backendRG: "Demo_rg_A"
+  backendStorage: "demostgab"
+  backendContainer: "democontainer"
+  # Target environment directory
+  workingDirectory: "$(System.DefaultWorkingDirectory)/environments/${{ parameters.environment }}"
 
-          # 2. Authenticate with Azure Service Connection and run Terraform
-          - task: AzureCLI@2
-            displayName: "Execute Terraform (${{ parameters.environment }}: ${{ parameters.action }})"
-            inputs:
-              azureSubscription: "$(serviceConnection)"
-              scriptType: "bash"
-              scriptLocation: "inlineScript"
-              addSpnToEnvironment: true
-              inlineScript: |
-                set -e
+steps:
+  # 1. Install Terraform (Assistant Task: Terraform tool installer)
+  - task: TerraformInstaller@1
+    displayName: "Install Terraform"
+    inputs:
+      terraformVersion: "latest"
 
-                echo "=========================================================="
-                echo " Target Environment : ${{ parameters.environment }}"
-                echo " Action             : ${{ parameters.action }}"
-                echo " Backend Resource Grp: $(backendResourceGroup)"
-                echo " Backend Storage Acc: $(backendStorageAccount)"
-                echo " Backend Container  : $(backendContainer)"
-                echo "=========================================================="
+  # 2. Terraform Init (Assistant Task: Terraform)
+  - task: TerraformTaskV4@4
+    displayName: "Terraform Init [${{ parameters.environment }}]"
+    inputs:
+      provider: "azurerm"
+      command: "init"
+      workingDirectory: "$(workingDirectory)"
+      backendServiceArm: "$(serviceConnection)"
+      backendAzureRmResourceGroupName: "$(backendRG)"
+      backendAzureRmStorageAccountName: "$(backendStorage)"
+      backendAzureRmContainerName: "$(backendContainer)"
+      backendAzureRmKey: "${{ parameters.environment }}.terraform.tfstate"
 
-                # Navigate to the appropriate environment directory
-                if [ -d "PostGres-SQL/environments/${{ parameters.environment }}" ]; then
-                  cd "PostGres-SQL/environments/${{ parameters.environment }}"
-                elif [ -d "environments/${{ parameters.environment }}" ]; then
-                  cd "environments/${{ parameters.environment }}"
-                else
-                  echo "Error: Directory for environment '${{ parameters.environment }}' not found!"
-                  exit 1
-                fi
+  # 3. Terraform Validate
+  - task: TerraformTaskV4@4
+    displayName: "Terraform Validate [${{ parameters.environment }}]"
+    inputs:
+      provider: "azurerm"
+      command: "validate"
+      workingDirectory: "$(workingDirectory)"
 
-                echo "Working directory: $(pwd)"
-                ls -la
+  # 4. Terraform Plan (Runs for 'plan' and 'apply')
+  - task: TerraformTaskV4@4
+    displayName: "Terraform Plan [${{ parameters.environment }}]"
+    condition: and(succeeded(), in('${{ parameters.action }}', 'plan', 'apply'))
+    inputs:
+      provider: "azurerm"
+      command: "plan"
+      workingDirectory: "$(workingDirectory)"
+      environmentServiceNameAzureRM: "$(serviceConnection)"
+      commandOptions: "-var-file=terraform.tfvars"
 
-                # Ensure Backend Storage Container exists in Azure
-                echo "==> Checking/Creating state storage container..."
-                az storage container create \
-                  --name "$(backendContainer)" \
-                  --account-name "$(backendStorageAccount)" \
-                  --auth-mode login \
-                  2>/dev/null || true
+  # 5. Terraform Apply (Runs only when action is 'apply')
+  - task: TerraformTaskV4@4
+    displayName: "Terraform Apply [${{ parameters.environment }}]"
+    condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
+    inputs:
+      provider: "azurerm"
+      command: "apply"
+      workingDirectory: "$(workingDirectory)"
+      environmentServiceNameAzureRM: "$(serviceConnection)"
+      commandOptions: "-var-file=terraform.tfvars"
 
-                # Retrieve storage account key to grant backend state management permissions
-                echo "==> Fetching storage account key for backend authentication..."
-                STORAGE_KEY=$(az storage account keys list \
-                  --resource-group "$(backendResourceGroup)" \
-                  --account-name "$(backendStorageAccount)" \
-                  --query "[0].value" -o tsv 2>/dev/null || echo "")
-
-                if [ -n "$STORAGE_KEY" ]; then
-                  export ARM_ACCESS_KEY="$STORAGE_KEY"
-                  echo "Storage access key exported for state backend."
-                fi
-
-                # Configure AzureRM Provider credentials from AzureCLI Service Connection
-                export ARM_CLIENT_ID="$servicePrincipalId"
-                export ARM_CLIENT_SECRET="$servicePrincipalKey"
-                export ARM_TENANT_ID="$tenantId"
-                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
-                export ARM_USE_AZURECLI=true
-
-                echo "ARM Subscription ID: $ARM_SUBSCRIPTION_ID"
-                echo "ARM Tenant ID: $ARM_TENANT_ID"
-
-                # 1. Terraform Init
-                echo "==> Running terraform init..."
-                terraform init -input=false
-
-                # 2. Terraform Validate
-                echo "==> Running terraform validate..."
-                terraform validate
-
-                # 3. Execute requested Action
-                ACTION="${{ parameters.action }}"
-
-                if [ "$ACTION" == "plan" ]; then
-                  echo "==> Running terraform plan..."
-                  terraform plan -input=false -var-file=terraform.tfvars
-
-                elif [ "$ACTION" == "apply" ]; then
-                  echo "==> Generating execution plan..."
-                  terraform plan -input=false -var-file=terraform.tfvars -out=tfplan
-                  echo "==> Applying execution plan..."
-                  terraform apply -input=false -auto-approve tfplan
-
-                elif [ "$ACTION" == "destroy" ]; then
-                  echo "==> Generating destroy plan..."
-                  terraform plan -destroy -input=false -var-file=terraform.tfvars -out=tfplan
-                  echo "==> Destroying resources..."
-                  terraform apply -input=false -auto-approve tfplan
-
-                else
-                  echo "Unknown action: $ACTION"
-                  exit 1
-                fi
-
-                echo "=========================================================="
-                echo " Terraform $ACTION completed successfully for ${{ parameters.environment }}"
-                echo "=========================================================="
+  # 6. Terraform Destroy (Runs only when action is 'destroy')
+  - task: TerraformTaskV4@4
+    displayName: "Terraform Destroy [${{ parameters.environment }}]"
+    condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
+    inputs:
+      provider: "azurerm"
+      command: "destroy"
+      workingDirectory: "$(workingDirectory)"
+      environmentServiceNameAzureRM: "$(serviceConnection)"
+      commandOptions: "-var-file=terraform.tfvars"
