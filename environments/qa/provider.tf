@@ -6,6 +6,12 @@ terraform {
       version = "~> 5.0"
     }
   }
+  backend "azurerm" {
+    resource_group_name  = "Demo_rg_A"
+    storage_account_name = "demostgab"
+    container_name       = "democontainer"
+    key                  = "qa.terraform.tfstate"
+  }
 }
 
 provider "azurerm" {
