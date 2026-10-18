@@ -1,5 +1,6 @@
 # ==============================================================================
 # Azure DevOps DevSecOps Pipeline:
+# Parameters: Environment (dev / qa / prod) + Action (apply / destroy)
 # Security: Gitleaks (Secrets) + tfsec (Vulnerabilities) + Checkov (Compliance)
 # Cost: Azure Infrastructure Monthly Budget Estimator
 # Results: Native "Tests" Tab + "Pipeline Summary" Dashboard + Console Tables
@@ -23,6 +24,14 @@ parameters:
       - qa
       - prod
 
+  - name: action
+    displayName: "Select Action (apply / destroy)"
+    type: string
+    default: "apply"
+    values:
+      - apply
+      - destroy
+
 variables:
   serviceConnection: "Axion project"
   backendRG: "Demo_rg_A"
@@ -35,7 +44,7 @@ stages:
   # STAGE 1: SECURITY SCAN, COST ESTIMATION & TERRAFORM PLAN
   # ============================================================================
   - stage: ScanAndPlan
-    displayName: "Security, Cost & Plan [${{ parameters.environment }}]"
+    displayName: "Security, Cost & Plan [${{ parameters.environment }} : ${{ parameters.action }}]"
     pool:
       vmImage: "ubuntu-latest"
     jobs:
@@ -116,7 +125,7 @@ stages:
 
               # Build unified summary dashboard for Azure DevOps Overview Tab
               echo "## DevSecOps & Cost Summary Dashboard" > "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
-              echo "Target Environment: **${{ parameters.environment }}**" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              echo "Target Environment: **${{ parameters.environment }}** | Action: **${{ parameters.action }}**" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
               echo "" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
               if [ -f "$(System.DefaultWorkingDirectory)/cost-report.md" ]; then
                 cat "$(System.DefaultWorkingDirectory)/cost-report.md" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
@@ -154,8 +163,10 @@ stages:
               command: "validate"
               workingDirectory: "$(workingDirectory)"
 
+          # Terraform Plan for APPLY
           - task: TerraformTaskV4@4
-            displayName: "Terraform Plan"
+            displayName: "Terraform Plan (Apply)"
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
             inputs:
               provider: "azurerm"
               command: "plan"
@@ -163,11 +174,22 @@ stages:
               environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-var-file=terraform.tfvars"
 
+          # Terraform Plan for DESTROY
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Plan (Destroy)"
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
+            inputs:
+              provider: "azurerm"
+              command: "plan"
+              workingDirectory: "$(workingDirectory)"
+              environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
+              commandOptions: "-destroy -var-file=terraform.tfvars"
+
   # ============================================================================
-  # STAGE 2: MANUAL APPROVAL (Apply se pehle Security aur Cost Review)
+  # STAGE 2: MANUAL APPROVAL (Apply / Destroy se pehle review)
   # ============================================================================
   - stage: Approval
-    displayName: "Manual Approval [${{ parameters.environment }}]"
+    displayName: "Manual Approval [${{ parameters.environment }} : ${{ parameters.action }}]"
     dependsOn: ScanAndPlan
     jobs:
       - job: WaitForApproval
@@ -176,22 +198,22 @@ stages:
         timeoutInMinutes: 1440
         steps:
           - task: ManualValidation@0
-            displayName: "Approve Apply for ${{ parameters.environment }}"
+            displayName: "Approve ${{ parameters.action }} for ${{ parameters.environment }}"
             timeoutInMinutes: 1440
             inputs:
-              instructions: "Please review the Gitleaks secrets report, tfsec & Checkov security findings, Azure monthly cost breakdown, and Terraform Plan logs in Stage 1. Click 'Resume' to approve deployment to ${{ parameters.environment }} or 'Reject' to cancel."
+              instructions: "ATTENTION: Action requested is '${{ parameters.action }}' on '${{ parameters.environment }}'. Please review Stage 1 logs (Plan & Security). Click 'Resume' to proceed with ${{ parameters.action }} or 'Reject' to abort."
 
   # ============================================================================
-  # STAGE 3: TERRAFORM APPLY
+  # STAGE 3: TERRAFORM EXECUTE (Apply ya Destroy)
   # ============================================================================
-  - stage: Apply
-    displayName: "Terraform Apply [${{ parameters.environment }}]"
+  - stage: Execute
+    displayName: "Terraform ${{ parameters.action }} [${{ parameters.environment }}]"
     dependsOn: Approval
     pool:
       vmImage: "ubuntu-latest"
     jobs:
-      - job: TerraformApply
-        displayName: "Run Terraform Apply"
+      - job: TerraformExecute
+        displayName: "Run Terraform ${{ parameters.action }}"
         steps:
           - task: TerraformInstaller@1
             displayName: "Install Terraform"
@@ -210,11 +232,24 @@ stages:
               backendAzureRmContainerName: "$(backendContainer)"
               backendAzureRmKey: "${{ parameters.environment }}.terraform.tfstate"
 
+          # Execute Apply
           - task: TerraformTaskV4@4
             displayName: "Terraform Apply"
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
             inputs:
               provider: "azurerm"
               command: "apply"
+              workingDirectory: "$(workingDirectory)"
+              environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
+              commandOptions: "-var-file=terraform.tfvars"
+
+          # Execute Destroy
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Destroy"
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
+            inputs:
+              provider: "azurerm"
+              command: "destroy"
               workingDirectory: "$(workingDirectory)"
               environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-var-file=terraform.tfvars"
