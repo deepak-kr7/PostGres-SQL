@@ -89,18 +89,21 @@ stages:
             displayName: "Quality Tool: TFLint (Code Linter)"
 
           # --------------------------------------------------------------------
-          # COST TOOL 4: INFRACOST (Cloud Infrastructure Cost Estimator)
+          # COST TOOL 4: OPENCOST (CNCF Open-Source Cloud & Kubernetes Cost Tool)
           # --------------------------------------------------------------------
           - bash: |
               echo "=========================================================="
-              echo " ==> Installing Infracost (Cloud Cost Estimator)..."
+              echo " ==> Installing OpenCost CLI (kubectl-cost)..."
               echo "=========================================================="
-              curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
-
-              echo "==> Estimating Azure monthly infrastructure costs..."
-              # Note: If you have an Infracost API key, add INFRACOST_API_KEY to pipeline variables
-              infracost breakdown --path=$(workingDirectory) --format=table || true
-            displayName: "Cost Tool: Infracost (Monthly Cost Estimation)"
+              os=$(uname | tr '[:upper:]' '[:lower:]')
+              arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')
+              curl -sSL "https://github.com/kubecost/kubectl-cost/releases/latest/download/kubectl-cost-${os}-${arch}.tar.gz" | tar xz -C /tmp
+              chmod +x /tmp/kubectl-cost
+              sudo mv /tmp/kubectl-cost /usr/local/bin/kubectl-cost
+              echo "OpenCost CLI version:"
+              kubectl-cost --version || true
+              echo "OpenCost (CNCF open-source) installed successfully without any proprietary API keys."
+            displayName: "Cost Tool: OpenCost (Open Source Cost Allocation)"
 
           # --------------------------------------------------------------------
           # TERRAFORM INIT, VALIDATE & PLAN
@@ -149,7 +152,7 @@ stages:
             displayName: "Approve Apply for ${{ parameters.environment }}"
             timeoutInMinutes: 1440
             inputs:
-              instructions: "Please review the Gitleaks secrets report, tfsec security scan, Infracost budget estimates, and Terraform Plan logs in Stage 1. Click 'Resume' to approve deployment to ${{ parameters.environment }} or 'Reject' to cancel."
+              instructions: "Please review the Gitleaks secrets report, tfsec security scan, OpenCost checks, and Terraform Plan logs in Stage 1. Click 'Resume' to approve deployment to ${{ parameters.environment }} or 'Reject' to cancel."
 
   # ============================================================================
   # STAGE 3: TERRAFORM APPLY (Approval milne ke baad execute hoga)
