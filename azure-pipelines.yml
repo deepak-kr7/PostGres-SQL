@@ -61,7 +61,7 @@ stages:
               provider: "azurerm"
               command: "init"
               workingDirectory: "$(workingDirectory)"
-              backendServiceArm: "$(serviceConnection)"
+              backendServiceArm: "${{ variables.serviceConnection }}"
               backendAzureRmResourceGroupName: "$(backendRG)"
               backendAzureRmStorageAccountName: "$(backendStorage)"
               backendAzureRmContainerName: "$(backendContainer)"
@@ -83,7 +83,7 @@ stages:
               provider: "azurerm"
               command: "plan"
               workingDirectory: "$(workingDirectory)"
-              environmentServiceNameAzureRM: "$(serviceConnection)"
+              environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-var-file=terraform.tfvars"
 
           # 4. Terraform Plan (Destroy plan agar action destroy ho)
@@ -94,7 +94,7 @@ stages:
               provider: "azurerm"
               command: "plan"
               workingDirectory: "$(workingDirectory)"
-              environmentServiceNameAzureRM: "$(serviceConnection)"
+              environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-destroy -var-file=terraform.tfvars"
 
   # ============================================================================
@@ -142,7 +142,7 @@ stages:
               provider: "azurerm"
               command: "init"
               workingDirectory: "$(workingDirectory)"
-              backendServiceArm: "$(serviceConnection)"
+              backendServiceArm: "${{ variables.serviceConnection }}"
               backendAzureRmResourceGroupName: "$(backendRG)"
               backendAzureRmStorageAccountName: "$(backendStorage)"
               backendAzureRmContainerName: "$(backendContainer)"
@@ -156,7 +156,7 @@ stages:
               provider: "azurerm"
               command: "apply"
               workingDirectory: "$(workingDirectory)"
-              environmentServiceNameAzureRM: "$(serviceConnection)"
+              environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-var-file=terraform.tfvars"
 
           # 4. Terraform Destroy
@@ -167,5 +167,5 @@ stages:
               provider: "azurerm"
               command: "destroy"
               workingDirectory: "$(workingDirectory)"
-              environmentServiceNameAzureRM: "$(serviceConnection)"
+              environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-var-file=terraform.tfvars"
