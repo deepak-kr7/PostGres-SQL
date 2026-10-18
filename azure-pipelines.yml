@@ -1,5 +1,5 @@
 # ==============================================================================
-# Azure DevOps Pipeline (Standard Task Assistant Format)
+# Azure DevOps Pipeline (Task Assistant Format with Manual Approval)
 # Organization: pipelineagentic
 # Project: Axion_project (https://dev.azure.com/pipelineagentic/Axion_project)
 # Service Connection: Axion project
@@ -29,74 +29,143 @@ parameters:
       - apply
       - destroy
 
-pool:
-  vmImage: "ubuntu-latest"
-
 variables:
   serviceConnection: "Axion project"
   backendRG: "Demo_rg_A"
   backendStorage: "demostgab"
   backendContainer: "democontainer"
-  # Target environment directory
   workingDirectory: "$(System.DefaultWorkingDirectory)/environments/${{ parameters.environment }}"
 
-steps:
-  # 1. Install Terraform (Assistant Task: Terraform tool installer)
-  - task: TerraformInstaller@1
-    displayName: "Install Terraform"
-    inputs:
-      terraformVersion: "latest"
-
-  # 2. Terraform Init (Assistant Task: Terraform)
-  - task: TerraformTaskV4@4
-    displayName: "Terraform Init [${{ parameters.environment }}]"
-    inputs:
-      provider: "azurerm"
-      command: "init"
-      workingDirectory: "$(workingDirectory)"
-      backendServiceArm: "$(serviceConnection)"
-      backendAzureRmResourceGroupName: "$(backendRG)"
-      backendAzureRmStorageAccountName: "$(backendStorage)"
-      backendAzureRmContainerName: "$(backendContainer)"
-      backendAzureRmKey: "${{ parameters.environment }}.terraform.tfstate"
-
-  # 3. Terraform Validate
-  - task: TerraformTaskV4@4
-    displayName: "Terraform Validate [${{ parameters.environment }}]"
-    inputs:
-      provider: "azurerm"
-      command: "validate"
-      workingDirectory: "$(workingDirectory)"
-
-  # 4. Terraform Plan (Runs for 'plan' and 'apply')
-  - task: TerraformTaskV4@4
+stages:
+  # ============================================================================
+  # STAGE 1: PLAN (Init, Validate, Plan)
+  # ============================================================================
+  - stage: Plan
     displayName: "Terraform Plan [${{ parameters.environment }}]"
-    condition: and(succeeded(), in('${{ parameters.action }}', 'plan', 'apply'))
-    inputs:
-      provider: "azurerm"
-      command: "plan"
-      workingDirectory: "$(workingDirectory)"
-      environmentServiceNameAzureRM: "$(serviceConnection)"
-      commandOptions: "-var-file=terraform.tfvars"
+    pool:
+      vmImage: "ubuntu-latest"
+    jobs:
+      - job: TerraformPlan
+        displayName: "Run Plan"
+        steps:
+          # 1. Install Terraform
+          - task: TerraformInstaller@1
+            displayName: "Install Terraform"
+            inputs:
+              terraformVersion: "latest"
 
-  # 5. Terraform Apply (Runs only when action is 'apply')
-  - task: TerraformTaskV4@4
-    displayName: "Terraform Apply [${{ parameters.environment }}]"
-    condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
-    inputs:
-      provider: "azurerm"
-      command: "apply"
-      workingDirectory: "$(workingDirectory)"
-      environmentServiceNameAzureRM: "$(serviceConnection)"
-      commandOptions: "-var-file=terraform.tfvars"
+          # 2. Terraform Init
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Init"
+            inputs:
+              provider: "azurerm"
+              command: "init"
+              workingDirectory: "$(workingDirectory)"
+              backendServiceArm: "$(serviceConnection)"
+              backendAzureRmResourceGroupName: "$(backendRG)"
+              backendAzureRmStorageAccountName: "$(backendStorage)"
+              backendAzureRmContainerName: "$(backendContainer)"
+              backendAzureRmKey: "${{ parameters.environment }}.terraform.tfstate"
 
-  # 6. Terraform Destroy (Runs only when action is 'destroy')
-  - task: TerraformTaskV4@4
-    displayName: "Terraform Destroy [${{ parameters.environment }}]"
-    condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
-    inputs:
-      provider: "azurerm"
-      command: "destroy"
-      workingDirectory: "$(workingDirectory)"
-      environmentServiceNameAzureRM: "$(serviceConnection)"
-      commandOptions: "-var-file=terraform.tfvars"
+          # 3. Terraform Validate
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Validate"
+            inputs:
+              provider: "azurerm"
+              command: "validate"
+              workingDirectory: "$(workingDirectory)"
+
+          # 4. Terraform Plan (Normal)
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Plan"
+            condition: and(succeeded(), ne('${{ parameters.action }}', 'destroy'))
+            inputs:
+              provider: "azurerm"
+              command: "plan"
+              workingDirectory: "$(workingDirectory)"
+              environmentServiceNameAzureRM: "$(serviceConnection)"
+              commandOptions: "-var-file=terraform.tfvars"
+
+          # 4. Terraform Plan (Destroy plan agar action destroy ho)
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Plan (Destroy)"
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
+            inputs:
+              provider: "azurerm"
+              command: "plan"
+              workingDirectory: "$(workingDirectory)"
+              environmentServiceNameAzureRM: "$(serviceConnection)"
+              commandOptions: "-destroy -var-file=terraform.tfvars"
+
+  # ============================================================================
+  # STAGE 2: MANUAL APPROVAL (Sirf Apply ya Destroy hone par pause karega)
+  # ============================================================================
+  - stage: Approval
+    displayName: "Manual Approval [${{ parameters.environment }}]"
+    dependsOn: Plan
+    condition: and(succeeded(), in('${{ parameters.action }}', 'apply', 'destroy'))
+    jobs:
+      - job: WaitForApproval
+        displayName: "Wait for Manual Approval"
+        pool: server
+        timeoutInMinutes: 1440
+        steps:
+          - task: ManualValidation@0
+            displayName: "Approve Terraform ${{ parameters.action }}"
+            timeoutInMinutes: 1440
+            inputs:
+              instructions: "Please review the Terraform Plan logs in Stage 1. Click 'Resume' to approve ${{ parameters.action }} or 'Reject' to cancel."
+
+  # ============================================================================
+  # STAGE 3: EXECUTE (Approval ke baad apply ya destroy chalega)
+  # ============================================================================
+  - stage: Execute
+    displayName: "Terraform ${{ parameters.action }} [${{ parameters.environment }}]"
+    dependsOn: Approval
+    condition: and(succeeded(), in('${{ parameters.action }}', 'apply', 'destroy'))
+    pool:
+      vmImage: "ubuntu-latest"
+    jobs:
+      - job: TerraformExecute
+        displayName: "Execute ${{ parameters.action }}"
+        steps:
+          # 1. Install Terraform
+          - task: TerraformInstaller@1
+            displayName: "Install Terraform"
+            inputs:
+              terraformVersion: "latest"
+
+          # 2. Terraform Init
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Init"
+            inputs:
+              provider: "azurerm"
+              command: "init"
+              workingDirectory: "$(workingDirectory)"
+              backendServiceArm: "$(serviceConnection)"
+              backendAzureRmResourceGroupName: "$(backendRG)"
+              backendAzureRmStorageAccountName: "$(backendStorage)"
+              backendAzureRmContainerName: "$(backendContainer)"
+              backendAzureRmKey: "${{ parameters.environment }}.terraform.tfstate"
+
+          # 3. Terraform Apply
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Apply"
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
+            inputs:
+              provider: "azurerm"
+              command: "apply"
+              workingDirectory: "$(workingDirectory)"
+              environmentServiceNameAzureRM: "$(serviceConnection)"
+              commandOptions: "-var-file=terraform.tfvars"
+
+          # 4. Terraform Destroy
+          - task: TerraformTaskV4@4
+            displayName: "Terraform Destroy"
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
+            inputs:
+              provider: "azurerm"
+              command: "destroy"
+              workingDirectory: "$(workingDirectory)"
+              environmentServiceNameAzureRM: "$(serviceConnection)"
+              commandOptions: "-var-file=terraform.tfvars"
