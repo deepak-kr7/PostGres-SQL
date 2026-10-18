@@ -1,5 +1,5 @@
 # ==============================================================================
-# Azure DevOps Pipeline (Task Assistant Format with Manual Approval)
+# Azure DevOps Pipeline: Security Scan -> Terraform Plan -> Approval -> Apply
 # Organization: pipelineagentic
 # Project: Axion_project (https://dev.azure.com/pipelineagentic/Axion_project)
 # Service Connection: Axion project
@@ -10,6 +10,7 @@
 trigger: none
 pr: none
 
+# Parameter: Sirf Environment select karne ke liye (Command parameter hata diya hai)
 parameters:
   - name: environment
     displayName: "Select Target Environment"
@@ -20,15 +21,6 @@ parameters:
       - qa
       - prod
 
-  - name: action
-    displayName: "Select Terraform Action"
-    type: string
-    default: "plan"
-    values:
-      - plan
-      - apply
-      - destroy
-
 variables:
   serviceConnection: "Axion project"
   backendRG: "Demo_rg_A"
@@ -38,23 +30,32 @@ variables:
 
 stages:
   # ============================================================================
-  # STAGE 1: PLAN (Init, Validate, Plan)
+  # STAGE 1: SECURITY SCAN & TERRAFORM PLAN
   # ============================================================================
   - stage: Plan
-    displayName: "Terraform Plan [${{ parameters.environment }}]"
+    displayName: "Security Scan & Plan [${{ parameters.environment }}]"
     pool:
       vmImage: "ubuntu-latest"
     jobs:
-      - job: TerraformPlan
-        displayName: "Run Plan"
+      - job: SecurityAndPlan
+        displayName: "Run Security Scan & Terraform Plan"
         steps:
-          # 1. Install Terraform
+          # 1. Install Terraform CLI
           - task: TerraformInstaller@1
             displayName: "Install Terraform"
             inputs:
               terraformVersion: "latest"
 
-          # 2. Terraform Init
+          # 2. Security Tool: tfsec (Terraform Security Scanner)
+          - bash: |
+              echo "==> Installing tfsec security scanner..."
+              curl -sSL https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -o /tmp/tfsec
+              chmod +x /tmp/tfsec
+              echo "==> Running security scan on $(workingDirectory)..."
+              /tmp/tfsec $(workingDirectory) --soft-fail
+            displayName: "Security Scan (tfsec)"
+
+          # 3. Terraform Init (AzureRM Backend)
           - task: TerraformTaskV4@4
             displayName: "Terraform Init"
             inputs:
@@ -67,7 +68,7 @@ stages:
               backendAzureRmContainerName: "$(backendContainer)"
               backendAzureRmKey: "${{ parameters.environment }}.terraform.tfstate"
 
-          # 3. Terraform Validate
+          # 4. Terraform Validate
           - task: TerraformTaskV4@4
             displayName: "Terraform Validate"
             inputs:
@@ -75,10 +76,9 @@ stages:
               command: "validate"
               workingDirectory: "$(workingDirectory)"
 
-          # 4. Terraform Plan (Normal)
+          # 5. Terraform Plan
           - task: TerraformTaskV4@4
             displayName: "Terraform Plan"
-            condition: and(succeeded(), ne('${{ parameters.action }}', 'destroy'))
             inputs:
               provider: "azurerm"
               command: "plan"
@@ -86,24 +86,12 @@ stages:
               environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-var-file=terraform.tfvars"
 
-          # 4. Terraform Plan (Destroy plan agar action destroy ho)
-          - task: TerraformTaskV4@4
-            displayName: "Terraform Plan (Destroy)"
-            condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
-            inputs:
-              provider: "azurerm"
-              command: "plan"
-              workingDirectory: "$(workingDirectory)"
-              environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
-              commandOptions: "-destroy -var-file=terraform.tfvars"
-
   # ============================================================================
-  # STAGE 2: MANUAL APPROVAL (Sirf Apply ya Destroy hone par pause karega)
+  # STAGE 2: MANUAL APPROVAL (Apply karne se pehle review & approval)
   # ============================================================================
   - stage: Approval
     displayName: "Manual Approval [${{ parameters.environment }}]"
     dependsOn: Plan
-    condition: and(succeeded(), in('${{ parameters.action }}', 'apply', 'destroy'))
     jobs:
       - job: WaitForApproval
         displayName: "Wait for Manual Approval"
@@ -111,25 +99,24 @@ stages:
         timeoutInMinutes: 1440
         steps:
           - task: ManualValidation@0
-            displayName: "Approve Terraform ${{ parameters.action }}"
+            displayName: "Approve Apply for ${{ parameters.environment }}"
             timeoutInMinutes: 1440
             inputs:
-              instructions: "Please review the Terraform Plan logs in Stage 1. Click 'Resume' to approve ${{ parameters.action }} or 'Reject' to cancel."
+              instructions: "Please review the Security Scan (tfsec) results and Terraform Plan logs in Stage 1. Click 'Resume' to approve Apply or 'Reject' to abort."
 
   # ============================================================================
-  # STAGE 3: EXECUTE (Approval ke baad apply ya destroy chalega)
+  # STAGE 3: TERRAFORM APPLY (Approval milne ke baad execute hoga)
   # ============================================================================
-  - stage: Execute
-    displayName: "Terraform ${{ parameters.action }} [${{ parameters.environment }}]"
+  - stage: Apply
+    displayName: "Terraform Apply [${{ parameters.environment }}]"
     dependsOn: Approval
-    condition: and(succeeded(), in('${{ parameters.action }}', 'apply', 'destroy'))
     pool:
       vmImage: "ubuntu-latest"
     jobs:
-      - job: TerraformExecute
-        displayName: "Execute ${{ parameters.action }}"
+      - job: TerraformApply
+        displayName: "Run Terraform Apply"
         steps:
-          # 1. Install Terraform
+          # 1. Install Terraform CLI
           - task: TerraformInstaller@1
             displayName: "Install Terraform"
             inputs:
@@ -151,21 +138,9 @@ stages:
           # 3. Terraform Apply
           - task: TerraformTaskV4@4
             displayName: "Terraform Apply"
-            condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
             inputs:
               provider: "azurerm"
               command: "apply"
-              workingDirectory: "$(workingDirectory)"
-              environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
-              commandOptions: "-var-file=terraform.tfvars"
-
-          # 4. Terraform Destroy
-          - task: TerraformTaskV4@4
-            displayName: "Terraform Destroy"
-            condition: and(succeeded(), eq('${{ parameters.action }}', 'destroy'))
-            inputs:
-              provider: "azurerm"
-              command: "destroy"
               workingDirectory: "$(workingDirectory)"
               environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-var-file=terraform.tfvars"
