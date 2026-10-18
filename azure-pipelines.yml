@@ -2,7 +2,7 @@
 # Azure DevOps DevSecOps Pipeline:
 # Security: Gitleaks (Secrets) + tfsec (Vulnerabilities) + Checkov (Compliance)
 # Cost: Azure Infrastructure Monthly Budget Estimator
-# Lifecycle: Security & Cost Scan -> Terraform Plan -> Manual Approval -> Apply
+# Results: Native "Tests" Tab + "Pipeline Summary" Dashboard + Console Tables
 # Organization: pipelineagentic
 # Project: Axion_project (https://dev.azure.com/pipelineagentic/Axion_project)
 # Service Connection: Axion project
@@ -59,12 +59,18 @@ stages:
               chmod +x /tmp/gitleaks
 
               echo "==> Scanning entire repository for leaked credentials, secrets & keys..."
-              /tmp/gitleaks detect --source="$(System.DefaultWorkingDirectory)" --no-git --verbose || true
-              echo "==> Gitleaks scan completed."
+              /tmp/gitleaks detect --source="$(System.DefaultWorkingDirectory)" --no-git --report-format json --report-path "$(System.DefaultWorkingDirectory)/gitleaks-report.json" --verbose || true
+
+              if [ -f "$(System.DefaultWorkingDirectory)/gitleaks-report.json" ] && [ -s "$(System.DefaultWorkingDirectory)/gitleaks-report.json" ]; then
+                echo "##vso[task.logissue type=warning]Gitleaks detected potential secret leaks in repository!"
+                cat "$(System.DefaultWorkingDirectory)/gitleaks-report.json"
+              else
+                echo "SUCCESS: 0 secrets or passwords leaked in repository."
+              fi
             displayName: "Security Tool 1: Gitleaks (Secret Detection)"
 
           # --------------------------------------------------------------------
-          # SECURITY TOOL 2: TFSEC (Terraform Cloud Vulnerability Scanner)
+          # SECURITY TOOL 2: TFSEC (Azure Cloud Vulnerability Scanner)
           # --------------------------------------------------------------------
           - bash: |
               echo "=========================================================="
@@ -73,9 +79,19 @@ stages:
               curl -sSL https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -o /tmp/tfsec
               chmod +x /tmp/tfsec
 
-              echo "==> Scanning all modules and environments with --force-all-dirs..."
-              /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --soft-fail || true
+              echo "==> Generating JUnit XML & Console Security Report..."
+              /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --format junit --out "$(System.DefaultWorkingDirectory)/tfsec-junit.xml" --soft-fail || true
+              /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --format table --soft-fail || true
             displayName: "Security Tool 2: tfsec (Vulnerability Scan)"
+
+          # Publish tfsec security test results to Azure DevOps native "Tests" Tab
+          - task: PublishTestResults@2
+            displayName: "Publish Security Test Results (Tests Tab)"
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "$(System.DefaultWorkingDirectory)/tfsec-junit.xml"
+              testRunTitle: "Terraform Security Scan (tfsec)"
+            condition: always()
 
           # --------------------------------------------------------------------
           # SECURITY TOOL 3: CHECKOV (CIS Benchmarks & Policy Scanner)
@@ -85,19 +101,36 @@ stages:
               echo " [3/4] CHECKOV: Policy & Compliance Security Audit"
               echo "=========================================================="
               pip install --quiet checkov
-              echo "==> Running Checkov on Terraform modules and environments..."
+              echo "==> Running Checkov on all modules and environments..."
               checkov -d $(System.DefaultWorkingDirectory) --framework terraform --soft-fail --output cli || true
             displayName: "Security Tool 3: Checkov (Compliance & CIS Audit)"
 
           # --------------------------------------------------------------------
-          # COST TOOL 4: AZURE INFRASTRUCTURE COST ESTIMATION
+          # COST TOOL 4: AZURE INFRASTRUCTURE COST ESTIMATION & SUMMARY DASHBOARD
           # --------------------------------------------------------------------
           - bash: |
               echo "=========================================================="
               echo " [4/4] COST ESTIMATION: Azure Monthly Budget Breakdown"
               echo "=========================================================="
-              python3 scripts/cost_estimator.py $(workingDirectory)
-            displayName: "Cost Tool: Azure Monthly Cost Estimation"
+              python3 scripts/cost_estimator.py $(workingDirectory) "$(System.DefaultWorkingDirectory)/cost-report.md"
+
+              # Build unified summary dashboard for Azure DevOps Overview Tab
+              echo "## DevSecOps & Cost Summary Dashboard" > "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              echo "Target Environment: **${{ parameters.environment }}**" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              echo "" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              if [ -f "$(System.DefaultWorkingDirectory)/cost-report.md" ]; then
+                cat "$(System.DefaultWorkingDirectory)/cost-report.md" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              fi
+              echo "" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              echo "### Security Gates Summary" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              echo "- **Gitleaks**: Secrets scan completed (see step logs for detected tokens)." >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              echo "- **tfsec**: Infrastructure security scan published to the native **Tests** tab." >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              echo "- **Checkov**: Azure CIS compliance audit completed." >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+              echo "" >> "$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+
+              # Upload markdown dashboard directly to the Azure DevOps Pipeline Run Summary page
+              echo "##vso[task.uploadsummary]$(System.DefaultWorkingDirectory)/DevSecOps-Report.md"
+            displayName: "Cost Tool: Azure Monthly Cost Estimation & Summary"
 
           # --------------------------------------------------------------------
           # TERRAFORM INIT, VALIDATE & PLAN

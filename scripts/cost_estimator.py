@@ -3,6 +3,7 @@
 Azure Infrastructure Cost Estimator
 Calculates and displays monthly cost estimates for Azure Terraform environments (dev, qa, prod)
 without requiring any proprietary SaaS API keys.
+Can output to console and generate a Markdown table for Azure DevOps Pipeline Summary.
 """
 
 import sys
@@ -46,7 +47,7 @@ def parse_tfvars(tfvars_path):
         content = f.read()
     return content
 
-def estimate_cost(env_dir):
+def estimate_cost(env_dir, md_output_path=None):
     tfvars_path = os.path.join(env_dir, "terraform.tfvars")
     content = parse_tfvars(tfvars_path)
     if not content:
@@ -61,6 +62,7 @@ def estimate_cost(env_dir):
     print(f"{'Component':<24} {'Resource / SKU':<28} {'Qty':<6} {'Rate/Hr':<12} {'Monthly Est.':<14}")
     print("-" * 86)
 
+    md_rows = []
     total_monthly = 0.0
 
     # 1. Virtual Machines
@@ -69,17 +71,20 @@ def estimate_cost(env_dir):
         vm_matches = re.findall(r'name\s*=\s*"([^"]+)"[\s\S]*?vm_size\s*=\s*"([^"]+)"[\s\S]*?os_disk_type\s*=\s*"([^"]+)"[\s\S]*?os_disk_size_gb\s*=\s*(\d+)', vms_block.group(1))
     else:
         vm_matches = []
+        
     for vm_name, vm_size, disk_type, disk_size in vm_matches:
         rate = HOURLY_RATES.get(vm_size, 0.05)
         monthly = rate * HOURS_PER_MONTH
         total_monthly += monthly
         print(f"{'Virtual Machine':<24} {f'{vm_name} ({vm_size})':<28} {'1':<6} {f'${rate:.4f}':<12} {f'${monthly:>8.2f}':<14}")
+        md_rows.append(f"| Virtual Machine | `{vm_name}` ({vm_size}) | 1 | ${rate:.4f} | **${monthly:.2f}** |")
         
         # Disk cost
         disk_rate_gb = HOURLY_RATES.get(disk_type, 0.0001)
         disk_monthly = int(disk_size) * disk_rate_gb * HOURS_PER_MONTH
         total_monthly += disk_monthly
         print(f"{'  OS Disk':<24} {f'{disk_size}GB {disk_type}':<28} {'1':<6} {'Included':<12} {f'${disk_monthly:>8.2f}':<14}")
+        md_rows.append(f"| OS Managed Disk | {disk_size}GB ({disk_type}) | 1 | Included | **${disk_monthly:.2f}** |")
 
     # 2. AKS Cluster
     aks_size = re.search(r'aks_node_vm_size\s*=\s*"([^"]+)"', content)
@@ -94,6 +99,8 @@ def estimate_cost(env_dir):
         total_monthly += monthly
         print(f"{'AKS Worker Nodes':<24} {f'{name} ({count}x {size})':<28} {str(count):<6} {f'${rate:.4f}':<12} {f'${monthly:>8.2f}':<14}")
         print(f"{'  AKS Control Plane':<24} {'Cluster Management':<28} {'1':<6} {'Free Tier':<12} {'$    0.00':<14}")
+        md_rows.append(f"| AKS Worker Nodes | `{name}` ({count}x {size}) | {count} | ${rate:.4f} | **${monthly:.2f}** |")
+        md_rows.append(f"| AKS Control Plane | Free Cluster Management | 1 | Free Tier | **$0.00** |")
 
     # 3. PostgreSQL Database
     psql_sku = re.search(r'postgres_sku_name\s*=\s*"([^"]+)"', content)
@@ -105,6 +112,7 @@ def estimate_cost(env_dir):
         monthly = rate * HOURS_PER_MONTH
         total_monthly += monthly
         print(f"{'PostgreSQL Flexible':<24} {f'{name} ({sku})':<28} {'1':<6} {f'${rate:.4f}':<12} {f'${monthly:>8.2f}':<14}")
+        md_rows.append(f"| PostgreSQL Database | `{name}` ({sku}) | 1 | ${rate:.4f} | **${monthly:.2f}** |")
 
     # 4. Container Registry (ACR)
     acr_sku = re.search(r'acr_sku\s*=\s*"([^"]+)"', content)
@@ -116,6 +124,7 @@ def estimate_cost(env_dir):
         monthly = rate * HOURS_PER_MONTH
         total_monthly += monthly
         print(f"{'Container Registry':<24} {f'{name} ({sku})':<28} {'1':<6} {f'${rate:.4f}':<12} {f'${monthly:>8.2f}':<14}")
+        md_rows.append(f"| Container Registry | `{name}` ({sku}) | 1 | ${rate:.4f} | **${monthly:.2f}** |")
 
     # 5. Public IP
     pip_count = len(re.findall(r'allocation_method\s*=\s*"Static"', content))
@@ -124,11 +133,23 @@ def estimate_cost(env_dir):
         monthly = rate * HOURS_PER_MONTH
         total_monthly += monthly
         print(f"{'Public IP Address':<24} {'Standard Static IPv4':<28} {str(pip_count):<6} {f'${rate:.4f}':<12} {f'${monthly:>8.2f}':<14}")
+        md_rows.append(f"| Public IP Address | Standard Static IPv4 | {pip_count} | ${rate:.4f} | **${monthly:.2f}** |")
 
     print("-" * 86)
     print(f"{'TOTAL ESTIMATED MONTHLY COST:':<59} {f'~${total_monthly:>8.2f} / month':<27}")
     print("=" * 86 + "\n")
 
+    if md_output_path:
+        with open(md_output_path, "w", encoding="utf-8") as f:
+            f.write(f"### 💰 Azure Estimated Monthly Cost Breakdown (`{env_name.upper()}`)\n\n")
+            f.write("| Component | Resource / SKU | Qty | Rate / Hour | Monthly Estimate |\n")
+            f.write("| :--- | :--- | :--- | :--- | :--- |\n")
+            for row in md_rows:
+                f.write(row + "\n")
+            f.write(f"| **TOTAL MONTHLY ESTIMATE** | — | — | — | **~${total_monthly:.2f} / month** |\n")
+        print(f"==> Markdown cost summary written to {md_output_path}")
+
 if __name__ == "__main__":
     target_dir = sys.argv[1] if len(sys.argv) > 1 else "."
-    estimate_cost(target_dir)
+    md_file = sys.argv[2] if len(sys.argv) > 2 else None
+    estimate_cost(target_dir, md_file)
