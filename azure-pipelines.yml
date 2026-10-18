@@ -1,5 +1,7 @@
 # ==============================================================================
-# Azure DevOps Pipeline: Security Scan -> Terraform Plan -> Approval -> Apply
+# Azure DevOps DevSecOps Pipeline:
+# Tools: Gitleaks (Secrets) + tfsec (Security) + TFLint (Linter) + Infracost (Cost)
+# Lifecycle: Quality & Security Scan -> Plan -> Manual Approval -> Apply
 # Organization: pipelineagentic
 # Project: Axion_project (https://dev.azure.com/pipelineagentic/Axion_project)
 # Service Connection: Axion project
@@ -10,7 +12,6 @@
 trigger: none
 pr: none
 
-# Parameter: Sirf Environment select karne ke liye (Command parameter hata diya hai)
 parameters:
   - name: environment
     displayName: "Select Target Environment"
@@ -30,15 +31,15 @@ variables:
 
 stages:
   # ============================================================================
-  # STAGE 1: SECURITY SCAN & TERRAFORM PLAN
+  # STAGE 1: DEVSECOPS CHECKS, COST ESTIMATION & TERRAFORM PLAN
   # ============================================================================
-  - stage: Plan
-    displayName: "Security Scan & Plan [${{ parameters.environment }}]"
+  - stage: ScanAndPlan
+    displayName: "Security, Cost & Plan [${{ parameters.environment }}]"
     pool:
       vmImage: "ubuntu-latest"
     jobs:
-      - job: SecurityAndPlan
-        displayName: "Run Security Scan & Terraform Plan"
+      - job: SecurityCostAndPlan
+        displayName: "Run Scans, Cost Estimate & Plan"
         steps:
           # 1. Install Terraform CLI
           - task: TerraformInstaller@1
@@ -46,16 +47,64 @@ stages:
             inputs:
               terraformVersion: "latest"
 
-          # 2. Security Tool: tfsec (Terraform Security Scanner)
+          # --------------------------------------------------------------------
+          # SECURITY TOOL 1: GITLEAKS (Secret & Credential Detection)
+          # --------------------------------------------------------------------
           - bash: |
-              echo "==> Installing tfsec security scanner..."
+              echo "=========================================================="
+              echo " ==> Installing Gitleaks (Secret Detection Tool)..."
+              echo "=========================================================="
+              curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
+              chmod +x /tmp/gitleaks
+
+              echo "==> Scanning repository for passwords, API tokens & secrets..."
+              /tmp/gitleaks detect --source="$(System.DefaultWorkingDirectory)" --no-git --verbose || true
+            displayName: "Security Tool: Gitleaks (Secret Detection)"
+
+          # --------------------------------------------------------------------
+          # SECURITY TOOL 2: TFSEC (Terraform Static Security Scanner)
+          # --------------------------------------------------------------------
+          - bash: |
+              echo "=========================================================="
+              echo " ==> Installing tfsec (Terraform Security Scanner)..."
+              echo "=========================================================="
               curl -sSL https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -o /tmp/tfsec
               chmod +x /tmp/tfsec
-              echo "==> Running security scan on $(workingDirectory)..."
-              /tmp/tfsec $(workingDirectory) --soft-fail
-            displayName: "Security Scan (tfsec)"
 
-          # 3. Terraform Init (AzureRM Backend)
+              echo "==> Scanning Terraform code for cloud vulnerabilities..."
+              /tmp/tfsec $(workingDirectory) --soft-fail
+            displayName: "Security Tool: tfsec (Vulnerability Scan)"
+
+          # --------------------------------------------------------------------
+          # QUALITY TOOL 3: TFLINT (Terraform Best Practices Linter)
+          # --------------------------------------------------------------------
+          - bash: |
+              echo "=========================================================="
+              echo " ==> Installing TFLint (Best Practices Linter)..."
+              echo "=========================================================="
+              curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+              echo "==> Running TFLint on $(workingDirectory)..."
+              tflint --chdir=$(workingDirectory) || true
+            displayName: "Quality Tool: TFLint (Code Linter)"
+
+          # --------------------------------------------------------------------
+          # COST TOOL 4: INFRACOST (Cloud Infrastructure Cost Estimator)
+          # --------------------------------------------------------------------
+          - bash: |
+              echo "=========================================================="
+              echo " ==> Installing Infracost (Cloud Cost Estimator)..."
+              echo "=========================================================="
+              curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
+
+              echo "==> Estimating Azure monthly infrastructure costs..."
+              # Note: If you have an Infracost API key, add INFRACOST_API_KEY to pipeline variables
+              infracost breakdown --path=$(workingDirectory) --format=table || true
+            displayName: "Cost Tool: Infracost (Monthly Cost Estimation)"
+
+          # --------------------------------------------------------------------
+          # TERRAFORM INIT, VALIDATE & PLAN
+          # --------------------------------------------------------------------
           - task: TerraformTaskV4@4
             displayName: "Terraform Init"
             inputs:
@@ -68,7 +117,6 @@ stages:
               backendAzureRmContainerName: "$(backendContainer)"
               backendAzureRmKey: "${{ parameters.environment }}.terraform.tfstate"
 
-          # 4. Terraform Validate
           - task: TerraformTaskV4@4
             displayName: "Terraform Validate"
             inputs:
@@ -76,7 +124,6 @@ stages:
               command: "validate"
               workingDirectory: "$(workingDirectory)"
 
-          # 5. Terraform Plan
           - task: TerraformTaskV4@4
             displayName: "Terraform Plan"
             inputs:
@@ -91,7 +138,7 @@ stages:
   # ============================================================================
   - stage: Approval
     displayName: "Manual Approval [${{ parameters.environment }}]"
-    dependsOn: Plan
+    dependsOn: ScanAndPlan
     jobs:
       - job: WaitForApproval
         displayName: "Wait for Manual Approval"
@@ -102,7 +149,7 @@ stages:
             displayName: "Approve Apply for ${{ parameters.environment }}"
             timeoutInMinutes: 1440
             inputs:
-              instructions: "Please review the Security Scan (tfsec) results and Terraform Plan logs in Stage 1. Click 'Resume' to approve Apply or 'Reject' to abort."
+              instructions: "Please review the Gitleaks secrets report, tfsec security scan, Infracost budget estimates, and Terraform Plan logs in Stage 1. Click 'Resume' to approve deployment to ${{ parameters.environment }} or 'Reject' to cancel."
 
   # ============================================================================
   # STAGE 3: TERRAFORM APPLY (Approval milne ke baad execute hoga)
