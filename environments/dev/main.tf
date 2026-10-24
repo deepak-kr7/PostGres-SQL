@@ -24,7 +24,7 @@ module "subnet" {
   subnets              = var.subnets
 }
 
-# 4. Public IP (Frontend VM)
+# 4. Public IPs (Frontend, Backend, Database VMs)
 module "public_ip" {
   source              = "../../modules/public_ip"
   resource_group_name = module.resource_group.name
@@ -48,14 +48,23 @@ module "network_interface" {
   tags = var.tags
 }
 
-# 6. 3-Tier Linux Virtual Machines (Frontend, Backend, Database)
+# 6. Azure Key Vault (Secrets Management)
+module "key_vault" {
+  source              = "../../modules/key_vault"
+  name                = var.key_vault_name
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+  tags                = var.tags
+}
+
+# 7. 3-Tier Linux Virtual Machines (Frontend, Backend, Database)
 module "virtual_machine" {
   source                = "../../modules/virtual_machine"
   resource_group_name   = module.resource_group.name
   location              = module.resource_group.location
   network_interface_ids = module.network_interface.nic_ids
   admin_username        = var.vm_admin_username
-  admin_password        = var.vm_admin_password
+  admin_password        = module.key_vault.vm_admin_password
   vms                   = var.vms
   tags                  = var.tags
 }
@@ -83,15 +92,46 @@ module "aks" {
   tags                = var.tags
 }
 
-# 9. PostgreSQL Flexible Server
+# 10. PostgreSQL Flexible Server
 module "postgres" {
-  source                 = "../../modules/postgres"
-  name                   = var.postgres_name
-  resource_group_name    = module.resource_group.name
-  location               = var.postgres_location
-  db_admin_username      = var.db_admin_username
-  db_admin_password      = var.db_admin_password
-  sku_name               = var.postgres_sku_name
-  database_name          = var.postgres_database_name
-  tags                   = var.tags
+  source              = "../../modules/postgres"
+  name                = var.postgres_name
+  resource_group_name = module.resource_group.name
+  location            = var.postgres_location
+  db_admin_username   = var.db_admin_username
+  db_admin_password   = module.key_vault.db_admin_password
+  sku_name            = var.postgres_sku_name
+  database_name       = var.postgres_database_name
+  tags                = var.tags
 }
+
+# 11. Azure Bastion Host Module (Imported from Azure)
+module "bastion" {
+  source                          = "../../modules/bastion"
+  name                            = var.bastion_name
+  resource_group_name             = module.resource_group.name
+  location                        = module.resource_group.location
+  virtual_network_name            = module.virtual_network.name
+  bastion_subnet_address_prefixes = ["10.10.0.0/26"]
+  bastion_public_ip_name          = var.bastion_public_ip_name
+  sku                             = var.bastion_sku
+  scale_units                     = var.bastion_scale_units
+  tags                            = var.tags
+}
+
+# Import manually created Bastion resources into Terraform State
+import {
+  to = module.bastion.azurerm_subnet.bastion_subnet
+  id = "/subscriptions/191839a3-3fe2-4852-b995-88a675fc1f7f/resourceGroups/rg-dev-axion/providers/Microsoft.Network/virtualNetworks/vnet-dev-axion/subnets/AzureBastionSubnet"
+}
+
+import {
+  to = module.bastion.azurerm_public_ip.bastion_pip
+  id = "/subscriptions/191839a3-3fe2-4852-b995-88a675fc1f7f/resourceGroups/rg-dev-axion/providers/Microsoft.Network/publicIPAddresses/vnetdevaxionip722"
+}
+
+import {
+  to = module.bastion.azurerm_bastion_host.bastion
+  id = "/subscriptions/191839a3-3fe2-4852-b995-88a675fc1f7f/resourceGroups/rg-dev-axion/providers/Microsoft.Network/bastionHosts/vnet-dev-axion-bastion"
+}
+

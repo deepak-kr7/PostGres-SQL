@@ -65,11 +65,12 @@ variable "vm_admin_username" {
   description = "VM Admin username"
 }
 
-variable "vm_admin_password" {
+variable "key_vault_name" {
   type        = string
-  sensitive   = true
-  description = "VM Admin password"
+  default     = "kvaxiondev01"
+  description = "Azure Key Vault name to store credentials secretly"
 }
+
 
 variable "vms" {
   type = map(object({
@@ -136,11 +137,6 @@ variable "db_admin_username" {
   description = "Database administrator username"
 }
 
-variable "db_admin_password" {
-  type        = string
-  sensitive   = true
-  description = "Database administrator password"
-}
 
 variable "postgres_sku_name" {
   type        = string
@@ -152,6 +148,31 @@ variable "postgres_database_name" {
   type        = string
   default     = "axiondb"
   description = "Initial database name"
+}
+
+# Azure Bastion Host
+variable "bastion_name" {
+  type        = string
+  default     = "vnet-dev-axion-bastion"
+  description = "Azure Bastion Host Name"
+}
+
+variable "bastion_public_ip_name" {
+  type        = string
+  default     = "vnetdevaxionip722"
+  description = "Bastion Public IP Name"
+}
+
+variable "bastion_sku" {
+  type        = string
+  default     = "Premium"
+  description = "Bastion SKU (Basic, Standard, or Premium)"
+}
+
+variable "bastion_scale_units" {
+  type        = number
+  default     = 2
+  description = "Bastion Scale Units"
 }
 
 variable "tags" {

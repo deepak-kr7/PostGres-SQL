@@ -18,6 +18,11 @@ output "vm_private_ips" {
   description = "Private IP addresses for Frontend, Backend, Database VMs"
 }
 
+output "vm_public_ips" {
+  value       = module.public_ip.public_ip_addresses
+  description = "Public IP addresses for Frontend, Backend, and Database VMs"
+}
+
 output "frontend_public_ip" {
   value       = module.public_ip.public_ip_addresses
   description = "Public IP address of Frontend VM"
@@ -37,3 +42,41 @@ output "postgres_fqdn" {
   value       = module.postgres.fqdn
   description = "PostgreSQL Server FQDN"
 }
+
+output "key_vault_name" {
+  value       = module.key_vault.key_vault_name
+  description = "Azure Key Vault name"
+}
+
+output "key_vault_uri" {
+  value       = module.key_vault.key_vault_uri
+  description = "Azure Key Vault URI"
+}
+
+output "vm_admin_password" {
+  value       = module.key_vault.vm_admin_password
+  sensitive   = true
+  description = "VM Admin Password (command: terraform output -raw vm_admin_password)"
+}
+
+output "db_admin_password" {
+  value       = module.key_vault.db_admin_password
+  sensitive   = true
+  description = "Database Admin Password (command: terraform output -raw db_admin_password)"
+}
+
+output "bastion_name" {
+  value       = module.bastion.bastion_name
+  description = "Azure Bastion Host Name"
+}
+
+output "bastion_dns_name" {
+  value       = module.bastion.bastion_dns_name
+  description = "Azure Bastion DNS / FQDN"
+}
+
+output "bastion_public_ip" {
+  value       = module.bastion.bastion_public_ip
+  description = "Azure Bastion Public IP"
+}
+

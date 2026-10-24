@@ -23,21 +23,15 @@ subnets = {
   }
 }
 
-# Public IP for Frontend VM
-public_ips = {
-  frontend = {
-    name              = "pip-dev-frontend"
-    allocation_method = "Static"
-    sku               = "Standard"
-  }
-}
+# Public IPs (None for VMs - Secure Access only via Azure Bastion)
+public_ips = {}
 
-# Network Interfaces
+# Network Interfaces (Private IPs only - Secured via Bastion)
 nics = {
   frontend = {
     name          = "nic-dev-frontend"
     subnet_key    = "frontend"
-    public_ip_key = "frontend"
+    public_ip_key = null
   }
   backend = {
     name          = "nic-dev-backend"
@@ -51,29 +45,31 @@ nics = {
   }
 }
 
-# VM Credentials
+# Azure Key Vault (Secret Credentials Management)
+key_vault_name = "kvaxiondev01"
+
+# VM Credentials (Password stored securely in Key Vault)
 vm_admin_username = "azureuser"
-vm_admin_password = "Password@12345!"
 
 # 3 Virtual Machines (Frontend, Backend, Database)
 vms = {
   frontend = {
     name            = "vm-dev-frontend"
-    vm_size         = "Standard_B1s"
+    vm_size         = "Standard_D2s_v4"
     nic_name        = "nic-dev-frontend"
     os_disk_type    = "Standard_LRS"
     os_disk_size_gb = 30
   }
   backend = {
     name            = "vm-dev-backend"
-    vm_size         = "Standard_B1s"
+    vm_size         = "Standard_D2s_v4"
     nic_name        = "nic-dev-backend"
     os_disk_type    = "Standard_LRS"
     os_disk_size_gb = 30
   }
   database = {
     name            = "vm-dev-database"
-    vm_size         = "Standard_B2s"
+    vm_size         = "Standard_D2s_v4"
     nic_name        = "nic-dev-database"
     os_disk_type    = "Standard_LRS"
     os_disk_size_gb = 32
@@ -88,15 +84,21 @@ acr_sku  = "Basic"
 aks_name         = "aks-dev-cluster"
 aks_dns_prefix   = "aksdev"
 aks_node_count   = 1
-aks_node_vm_size = "Standard_B2s"
+aks_node_vm_size = "Standard_D2s_v4"
 
 # PostgreSQL (Azure CAF Standard: psql-<app>-<env>-<instance>)
+# Password stored securely in Key Vault (db-admin-password)
 postgres_name          = "psql-axion-dev-01"
 postgres_location      = "centralus"
 db_admin_username      = "psqladmin"
-db_admin_password      = "Axion#Dev2026!Pass"
 postgres_sku_name      = "B_Standard_B1ms"
 postgres_database_name = "axiondb"
+
+# Azure Bastion Host (Imported from Azure)
+bastion_name           = "vnet-dev-axion-bastion"
+bastion_public_ip_name = "vnetdevaxionip722"
+bastion_sku            = "Premium"
+bastion_scale_units    = 2
 
 tags = {
   Environment = "dev"

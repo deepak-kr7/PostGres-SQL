@@ -85,13 +85,13 @@ module "aks" {
 
 # 9. PostgreSQL Flexible Server
 module "postgres" {
-  source                 = "../../modules/postgres"
-  name                   = var.postgres_name
-  resource_group_name    = module.resource_group.name
-  location               = var.postgres_location
-  db_admin_username      = var.db_admin_username
-  db_admin_password      = var.db_admin_password
-  sku_name               = var.postgres_sku_name
-  database_name          = var.postgres_database_name
-  tags                   = var.tags
+  source              = "../../modules/postgres"
+  name                = var.postgres_name
+  resource_group_name = module.resource_group.name
+  location            = var.postgres_location
+  db_admin_username   = var.db_admin_username
+  db_admin_password   = var.db_admin_password
+  sku_name            = var.postgres_sku_name
+  database_name       = var.postgres_database_name
+  tags                = var.tags
 }
