@@ -51,6 +51,8 @@ resource "azurerm_key_vault_secret" "vm_secret" {
   name         = "vm-admin-password"
   value        = random_password.vm_password.result
   key_vault_id = azurerm_key_vault.kv.id
+
+  depends_on = [azurerm_key_vault.kv]
 }
 
 # Step 6: Database Password ko Key Vault Secret mein save karna
@@ -58,4 +60,6 @@ resource "azurerm_key_vault_secret" "db_secret" {
   name         = "db-admin-password"
   value        = random_password.db_password.result
   key_vault_id = azurerm_key_vault.kv.id
+
+  depends_on = [azurerm_key_vault.kv]
 }

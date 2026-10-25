@@ -70,9 +70,10 @@ stages:
               echo "==> Scanning entire repository for leaked credentials, secrets & keys..."
               /tmp/gitleaks detect --source="$(System.DefaultWorkingDirectory)" --no-git --report-format json --report-path "$(System.DefaultWorkingDirectory)/gitleaks-report.json" --verbose || true
 
-              if [ -f "$(System.DefaultWorkingDirectory)/gitleaks-report.json" ] && [ -s "$(System.DefaultWorkingDirectory)/gitleaks-report.json" ]; then
+              REPORT="$(System.DefaultWorkingDirectory)/gitleaks-report.json"
+              if [ -f "$REPORT" ] && [ -s "$REPORT" ] && [ "$(tr -d '[:space:]' < "$REPORT")" != "[]" ]; then
                 echo "##vso[task.logissue type=warning]Gitleaks detected potential secret leaks in repository!"
-                cat "$(System.DefaultWorkingDirectory)/gitleaks-report.json"
+                cat "$REPORT"
               else
                 echo "SUCCESS: 0 secrets or passwords leaked in repository."
               fi
@@ -89,7 +90,7 @@ stages:
               chmod +x /tmp/tfsec
 
               echo "==> Generating JUnit XML & Console Security Report..."
-              /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --format junit --out "$(System.DefaultWorkingDirectory)/tfsec-junit.xml" --soft-fail || true
+              /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --format junit > "$(System.DefaultWorkingDirectory)/tfsec-junit.xml" 2>/dev/null || true
               /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --format table --soft-fail || true
             displayName: "Security Tool 2: tfsec (Vulnerability Scan)"
 
