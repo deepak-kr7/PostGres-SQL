@@ -135,3 +135,15 @@ import {
   id = "/subscriptions/191839a3-3fe2-4852-b995-88a675fc1f7f/resourceGroups/rg-dev-axion/providers/Microsoft.Network/bastionHosts/vnet-dev-axion-bastion"
 }
 
+# Import existing Key Vault Secrets into Terraform State
+import {
+  to = module.key_vault.azurerm_key_vault_secret.vm_secret
+  id = "https://kvaxiondev01.vault.azure.net/secrets/vm-admin-password/f492050d255847c4979e2b5feb1444ca"
+}
+
+import {
+  to = module.key_vault.azurerm_key_vault_secret.db_secret
+  id = "https://kvaxiondev01.vault.azure.net/secrets/db-admin-password/b09f1a6176944a88840ebd514d397b84"
+}
+
+
