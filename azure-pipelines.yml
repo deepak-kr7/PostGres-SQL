@@ -253,3 +253,40 @@ stages:
               workingDirectory: "$(workingDirectory)"
               environmentServiceNameAzureRM: "${{ variables.serviceConnection }}"
               commandOptions: "-var-file=terraform.tfvars"
+
+  # ============================================================================
+  # STAGE 4: GMAIL STATUS NOTIFICATION (Success & Failure dono pe run hoga)
+  # ============================================================================
+  - stage: NotifyStatus
+    displayName: "Gmail Notification [Success / Fail]"
+    dependsOn:
+      - ScanAndPlan
+      - Approval
+      - Execute
+    condition: always()
+    pool:
+      vmImage: "ubuntu-latest"
+    variables:
+      scanStatus: $[ stageDependencies.ScanAndPlan.SecurityCostAndPlan.result ]
+      approvalStatus: $[ stageDependencies.Approval.WaitForApproval.result ]
+      execStatus: $[ stageDependencies.Execute.TerraformExecute.result ]
+    jobs:
+      - job: SendStatusEmail
+        displayName: "Send Status Email to deepaknsn7@gmail.com"
+        steps:
+          - bash: |
+              python3 scripts/notify_status.py
+            displayName: "Send Gmail Notification"
+            condition: always()
+            env:
+              SMTP_USER: $(SMTP_USER)
+              SMTP_PASS: $(SMTP_PASS)
+              RECIPIENT_EMAIL: "deepaknsn7@gmail.com"
+              TARGET_ENV: "${{ parameters.environment }}"
+              ACTION: "${{ parameters.action }}"
+              STAGE_SCAN_STATUS: $(scanStatus)
+              STAGE_APPROVAL_STATUS: $(approvalStatus)
+              STAGE_EXECUTE_STATUS: $(execStatus)
+              BUILD_ID: $(Build.BuildId)
+              BUILD_URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+
