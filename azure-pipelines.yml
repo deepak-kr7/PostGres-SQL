@@ -38,6 +38,9 @@ variables:
   backendStorage: "demostgab"
   backendContainer: "democontainer"
   workingDirectory: "$(System.DefaultWorkingDirectory)/environments/${{ parameters.environment }}"
+  SMTP_USER: "deepaknsn7@gmail.com"
+  SMTP_PASS: "oulrmkapujnzjyku"
+
 
 stages:
   # ============================================================================

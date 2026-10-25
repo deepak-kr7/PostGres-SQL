@@ -18,9 +18,25 @@ from datetime import datetime, timezone
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-SENDER_EMAIL = os.environ.get("SMTP_USER", "").strip() or "deepaknsn7@gmail.com"
-APP_PASSWORD = os.environ.get("SMTP_PASS", "").strip().replace(" ", "") or "oulrmkapujnzjyku"
-RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", "").strip() or "deepaknsn7@gmail.com"
+# Parse credentials safely (Azure DevOps passes '$(SMTP_USER)' literally if unset)
+smtp_user_raw = os.environ.get("SMTP_USER", "").strip()
+if not smtp_user_raw or smtp_user_raw.startswith("$("):
+    SENDER_EMAIL = "deepaknsn7@gmail.com"
+else:
+    SENDER_EMAIL = smtp_user_raw
+
+smtp_pass_raw = os.environ.get("SMTP_PASS", "").strip()
+if not smtp_pass_raw or smtp_pass_raw.startswith("$("):
+    APP_PASSWORD = "oulrmkapujnzjyku"
+else:
+    APP_PASSWORD = smtp_pass_raw.replace(" ", "")
+
+recipient_raw = os.environ.get("RECIPIENT_EMAIL", "").strip()
+if not recipient_raw or recipient_raw.startswith("$("):
+    RECIPIENT_EMAIL = "deepaknsn7@gmail.com"
+else:
+    RECIPIENT_EMAIL = recipient_raw
+
 
 # Pipeline context from Azure DevOps environment variables
 TARGET_ENV = os.environ.get("TARGET_ENV", "dev")
