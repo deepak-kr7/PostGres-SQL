@@ -17,7 +17,7 @@ resource "azurerm_key_vault" "kv" {
   sku_name                   = "standard"
   rbac_authorization_enabled = false
 
-  # Access Policy: Terraform ko Secret create aur read karne ki permission
+  # Access Policy 1: Pipeline Service Principal ko permission
   access_policy {
     tenant_id = data.azurerm_client_config.current.tenant_id
     object_id = data.azurerm_client_config.current.object_id
@@ -28,6 +28,36 @@ resource "azurerm_key_vault" "kv" {
       "Set",
       "Delete",
       "Purge"
+    ]
+  }
+
+  # Access Policy 2: Deepak Kumar (Admin User) ko permanent view aur manage permission
+  access_policy {
+    tenant_id = data.azurerm_client_config.current.tenant_id
+    object_id = "ccf8453a-d52d-4945-94b6-9d4a457057ac"
+
+    key_permissions = [
+      "Get",
+      "List",
+      "Create",
+      "Delete",
+      "Update"
+    ]
+
+    secret_permissions = [
+      "Get",
+      "List",
+      "Set",
+      "Delete",
+      "Purge",
+      "Recover",
+      "Backup",
+      "Restore"
+    ]
+
+    certificate_permissions = [
+      "Get",
+      "List"
     ]
   }
 
