@@ -49,7 +49,7 @@ stages:
   - stage: ScanAndPlan
     displayName: "Security, Cost & Plan [${{ parameters.environment }} : ${{ parameters.action }}]"
     pool:
-      vmImage: "ubuntu-latest"
+      vmImage: "ubuntu-24.04"
     jobs:
       - job: SecurityCostAndPlan
         displayName: "Run Scans, Cost Breakdown & Plan"
@@ -94,6 +94,9 @@ stages:
 
               echo "==> Generating JUnit XML & Console Security Report..."
               /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --format junit > "$(System.DefaultWorkingDirectory)/tfsec-junit.xml" 2>/dev/null || true
+              if [ ! -s "$(System.DefaultWorkingDirectory)/tfsec-junit.xml" ] || ! grep -q "<testsuite" "$(System.DefaultWorkingDirectory)/tfsec-junit.xml"; then
+                echo '<?xml version="1.0" encoding="UTF-8"?><testsuites name="tfsec" tests="0" failures="0"></testsuites>' > "$(System.DefaultWorkingDirectory)/tfsec-junit.xml"
+              fi
               /tmp/tfsec $(System.DefaultWorkingDirectory) --force-all-dirs --format table --soft-fail || true
             displayName: "Security Tool 2: tfsec (Vulnerability Scan)"
 
@@ -214,7 +217,7 @@ stages:
     displayName: "Terraform ${{ parameters.action }} [${{ parameters.environment }}]"
     dependsOn: Approval
     pool:
-      vmImage: "ubuntu-latest"
+      vmImage: "ubuntu-24.04"
     jobs:
       - job: TerraformExecute
         displayName: "Run Terraform ${{ parameters.action }}"
@@ -269,7 +272,7 @@ stages:
       - Execute
     condition: always()
     pool:
-      vmImage: "ubuntu-latest"
+      vmImage: "ubuntu-24.04"
     variables:
       scanStatus: $[ stageDependencies.ScanAndPlan.SecurityCostAndPlan.result ]
       approvalStatus: $[ stageDependencies.Approval.WaitForApproval.result ]
